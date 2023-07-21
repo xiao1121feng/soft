@@ -50,7 +50,7 @@ for x in dir(uprop2):
          exec('old_figure = uprop2.UsageProperties.figure')
          exec('uprop2.UsageProperties.figure = new_figure')
       exec('%s = uprop2.%s' % (x, x))
-[root@vm-24-13-centos lic]# python -O -m compileall uprop.py && mv __pycache__/uprop.*.pyc uprop.pyc
+[root@vm-24-13-centos lic]# /usr/local/python3/bin/python3.7 -O -m compileall uprop.py && mv __pycache__/uprop.*.pyc uprop.pyc
 Compiling 'uprop.py'...
  
 # 最后打包一下就结束了
