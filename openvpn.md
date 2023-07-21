@@ -4,6 +4,7 @@
 </h1>
 ####openvpn 搭建
 ##安装python3.7
+
 ```
 yum install gcc* automake zlib-devel libjpeg-devel giflib-devel freetype-devel
 yum -y install make gcc-c++ cmake bison-devel ncurses-devel
