@@ -1,3 +1,7 @@
+<h1>from: 
+ https://zhuanlan.zhihu.com/p/589055979
+ https://oskr.cn/archives/openvpnaccessserver294po-jie-ren-shu-xian-zhi
+</h1>
 ####openvpn 搭建
 ##安装python3.7
 ```
