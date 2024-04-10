@@ -1,0 +1,333 @@
+#!/usr/bin/env python3
+# --author-- fengfeng
+# --encoding = UTF-8
+# --date-- 2019/12/10
+
+import subprocess
+from re import match
+import re
+import json
+import os
+
+share_path = '/usr/local/luyin1'         # 共享路径
+admin_user = 'xg9051'                    # 管理用的用户，手动创建并添加samaba配置文件
+conf_path = '/etc/samba/smb.conf'        # samba配置文件
+user_file = '/share/user.data'           # 用户数据文件
+
+
+# 修改共享的配置文件
+def samb_conf(user_data='', re_new=''):
+    tmp_file = []
+    if re_new != '':
+        tmp_file.append("""# See smb.conf.example for a more detailed config file or
+# read the smb.conf manpage.
+# Run 'testparm' to verify the config is correct after
+# you modified it.
+
+[global]
+	workgroup = STAFF
+	security = user
+
+	passdb backend = tdbsam
+
+	printing = cups
+	printcap name = cups
+	load printers = yes
+	cups options = raw""")
+        tmp_file.append("""[总览]
+        path = /usr/local/luyin1
+        write list = {0}
+        hosts allow = all""".format(admin_user))
+    for user_cn in user_data:
+        tmp_file.append("""[{0}-{1}]
+    	path = /usr/local/luyin1/{0}
+        write list = {1}
+    	hosts allow = all""".format(user_cn,user_data[user_cn]))
+
+    if re_new != '':
+        with open(conf_path, 'w') as f:
+            for file in tmp_file:
+                print(file+'\n')
+                f.write(file+'\n')
+        my_default()
+    else:
+        with open(conf_path, 'a+', encoding='UTF-8') as f:
+            for file in tmp_file:
+                print(file+'\n')
+                f.write(file+'\n')
+
+# 一对一
+def chmod_smb(user_data=''):
+    for user_cn in user_data:
+        if subprocess.call('chown -R {0}:{1} /usr/local/luyin1/{2}'.format(user_data[user_cn], admin_user, user_cn), shell=True) == 0:
+            print('{} 修改权限成功了'.format(user_cn))
+
+def user_save_to_file(user_data):
+    print('用户数据{}文件存在检验成功'.format(user_file)) if os.path.exists(user_file) else subprocess.call('touch {}'.format(user_file), shell=True)
+    with open(user_file, 'r', encoding='utf-8') as f:
+        content = f.read()
+        if content != '':
+            content = json.loads(content)
+            content.update(user_data)
+            print(content)
+            content = json.dumps(content)
+        else:
+            content = json.dumps(user_data)
+    with open(user_file, 'w', encoding='utf-8') as f:
+        f.write(content)
+
+# 批量添加传入一个用户字典； 新增一个用户，直接调用该函数
+def add_user(user_data=''):
+    if user_data == '':
+        new_user_cn = []
+        new_user_en = []
+        while True:
+            zh_user = input("请输入新增用户中文名(输入exit退出新增用户):")
+            if zh_user == 'exit':
+                break
+            if match('[\u2E80-\u9FFF]+', zh_user):
+                new_user_cn.append(zh_user)
+            else:
+                print("请重新输入")
+                continue
+            add = input("请输入新增英文名(输入exit退出新增用户):")
+            if match(' +|^\d+|\W+', add):
+               print("英文名必须以字母开头，与数字混合，不能是纯数字或其他字符,请重新输入")
+               continue
+            new_user_en.append(add)
+            user_data = user_to_dict(zh_user.split(','), add.split(','))
+            print('/usr/sbin/useradd -s /sbin/nologin {0} && mkdir {1}'.format(add, share_path+'/'+zh_user))
+            if subprocess.call('/usr/sbin/useradd -s /sbin/nologin {0} && mkdir {1}'.format(add, share_path+'/'+zh_user), shell=True) == 0:
+                print('用户{0}以及{1}创建成功'.format(add, share_path+'/{0}'.format(zh_user)))
+                chmod_smb(user_data={zh_user: add})
+                samb_conf(user_data={zh_user: add})
+                user_save_to_file(user_data={zh_user: add})
+        print("新增用户名: {0}".format(new_user_en))
+        return new_user_cn, new_user_en
+    else:
+        for user_cn in user_data:
+            print('/usr/sbin/useradd -s /sbin/nologin {0} && mkdir {1}'.format(user_data[user_cn], share_path+"/"+user_cn))
+            if subprocess.call('/usr/sbin/useradd -s /sbin/nologin {0} && mkdir {1}'.format(user_data[user_cn], share_path+"/"+user_cn), shell=True) == 0:
+                print('用户{0}以及{1}创建成功'.format(user_cn, share_path+user_data[user_cn]))
+        chmod_smb(user_data=user_data)
+        samb_conf(user_data=user_data)
+        user_save_to_file(user_data=user_data)
+
+def del_user(user):
+    # 预加载字典文件
+    pan = re.findall('[\u2E80-\u9FFF]+', user)
+    with open(user_file, 'r', encoding='utf-8') as f:
+        tmp = f.read()
+        tmp_glob = json.loads(tmp)
+    # 删除配置文件中的信息
+    with open(conf_path, 'r', encoding='utf-8') as f:
+        file_tmp = ''
+        # tmp = f.readline()
+        while True:
+            tmp = f.readline()
+            if tmp == '':
+                break
+            if re.findall(user, tmp):
+                [f.readline() for i in range(3)]
+            else:
+                file_tmp += tmp
+        print(file_tmp)
+    with open(conf_path, 'w', encoding='utf-8') as f:
+        f.write(file_tmp)
+
+    # 删除用户
+    print("已经存在的用户", tmp_glob)
+    if subprocess.call('userdel -r {0}'.format(user if pan == [] else tmp_glob[user]), shell=True) == 0:
+        print('用户\033[31m\"{}\"\033[0m删除成功'.format(user))
+
+    with open(user_file, 'r', encoding='utf-8') as f:
+        content = f.read()
+        content = json.loads(content)
+        d_user = ''
+        if pan == []:
+            d_user = [k for k,v in tmp_glob.items() if v == user][0]
+        content.pop(d_user)
+    with open(user_file, 'w', encoding='utf-8') as f:
+        f.write(json.dumps(content))
+
+# 创建用户和用户的目录
+def mk_dir_user(new_list1,new_list2):   
+    for i in range(len(new_list1)):
+        if subprocess.call('/usr/sbin/useradd -s /sbin/nologin {0} && mkdir {1}'.format(new_list2[i], share_path+'/{0}'.format(new_list1[i])), shell=True) == 0:
+            print('/usr/sbin/useradd -s /sbin/nologin {0} && mkdir {1}'.format(new_list2[i], share_path+'/{0}'.format(new_list2[i])))
+            print('用户\033[34m{0}\033[0m以及\033[34m{1}\033[0m创建成功'.format(new_list2[i], share_path+'/{0}'.format(new_list1[i])))
+    chmod_smb(new_list1, new_list2)
+#    return list1, list2
+
+# 重启用samba
+def restart(list1='', list2=''):
+    if subprocess.call('/usr/bin/systemctl restart smb', shell=True) == 0:
+        print('\033[43msmb服务重启成功\033[0m')
+        subprocess.call('/usr/bin/systemctl status smb', shell=True)
+
+# 用中文名修改密码需要传入glob参数
+def change_passwd(mod_user='', user='', glob='', user_data=''):
+    if user_data != '':
+        passwd = input("请输入密码:")
+        for user_cn in user_data:
+            print('echo -ne "{0}\n{0}\n" | pdbedit -a {1}'.format(passwd, user_data[user_cn]))
+            subprocess.call('echo -ne "{0}\n{0}\n" | pdbedit -a {1}'.format(passwd, user_data[user_cn]), shell=True)
+    elif  mod_user != '':
+        print("批量修改用户密码列表：")
+        for i in mod_user:
+            print('\033[34m{0}\033[0m'.format(i), end=' ')
+        print()
+        passwd = input("请输入密码:")
+        for user_tmp in mod_user:
+            print('echo -ne "{0}\n{0}\n" | pdbedit -a {1}'.format(passwd, mod_user[user_tmp]))
+            subprocess.call('echo -ne "{0}\n{0}\n" | pdbedit -a {1}'.format(passwd, mod_user[user_tmp]), shell=True)
+    else:
+        user_en = user if re.match('[a-z0-9]+', user) else glob[user]
+        print("修改用户\033[36m{0}\033[0m的密码".format(user_en))
+        passwd = input("请输入密码:")
+        print('echo -ne "{0}\n{0}\n" | pdbedit -a {1}'.format(passwd, user_en))
+        subprocess.call('echo -ne "{0}\n{0}\n" | pdbedit -a {1}'.format(passwd, user_en), shell=True)
+
+
+# 转换用户的数据为字典
+def user_to_dict(list1,list2):
+    dict_user = {}
+    if len(list1) == len(list2):
+        for i in range(len(list1)):
+            dict_user[list1[i]] = list2[i]
+    else:
+        print('\033[5;41m用户数据错误\033[0m')
+    return dict_user
+
+# 集合求交集
+def intersection(glob='', dest=''):
+    tmp = {}
+    for k,v in src.items():
+        for k_1,v_1 in dest.items():
+            if k == k_1 and v == v_1:
+                tmp[k] = v
+    return tmp
+
+# 一个默认的配置项
+def my_default():
+    default = '''[my-share]
+        path = /share
+        write list = share
+        hosts allow = all
+        '''
+    with open(conf_path, 'a+', encoding='utf-8') as f:
+        f.write(default)
+
+# 检查samba当前存在的用户
+def check_status():
+    name_tmp = []
+    with open('/etc/samba/smb.conf', 'r', encoding='utf-8') as f:
+        for i in f:
+            if i == '':
+                continue
+            if re.findall('\[([\u2E80-\u9FFF]+)', i):
+                name_tmp.append(re.findall('[\u2E80-\u9FFF]+', i)[0])
+    with open(user_file, 'r', encoding='utf-8') as f:
+        tmp = list(json.loads(f.read()).keys())
+        for i in name_tmp:
+            if i in tmp:
+                print('存在用户:\033[31m{}\033[0m'.format(i))
+            else:
+                print('用户\[033[31{}\033[0m存在异常'.format(i))
+        print()
+
+def main():
+    # 检验samba安装状态
+    test = ''
+    test = input("是否安装smaba(Y/N):") if subprocess.call('rpm -ql samba > /dev/null', shell=True) else print('samba已安装')
+    if test == 'Y':
+        subprocess.call('yum -y install samba', shell=True)
+
+    # samba共享路径检测
+    subprocess.call('mkdir {0}'.format(share_path), shell=True) if os.path.exists(share_path) != True else print('共享路径{0}已经准备好'.format(share_path))
+
+    # samba按装检测
+    subprocess.call('/usr/bin/yum -y install samba', shell=True) if subprocess.call('rpm -ql samba > /dev/null', shell=True) else print("smaba 已经安装")
+
+    # 判断管理用户
+    subprocess.call('useradd -s /sbin/nologin {0} > /dev/null'.format(admin_user), shell=True) if subprocess.call('id {0}'.format(admin_user), shell=True) else print('{0}已经创建'.format(admin_user))
+
+    while True:
+        print("""    \033[32m1）添加用户:
+    2）删除用户:
+    3）修改密码:
+    4）批量增加用户:
+    5) 批量修改密码:
+    6) 查看已知用户:
+    7) 重启服务:
+    0) 退出
+    \033[0m""")
+        with open(user_file, 'r', encoding='utf-8') as f:
+            tmp = f.read()
+            glob = json.loads(tmp)
+        # glob = user_to_dict(list1+list1_tmp, list2+list2_tmp)
+        # print(glob)
+        choice = input("请选择:")
+
+        caozuo = {
+            "1": add_user,
+            "2": del_user,
+            "3": change_passwd,
+            "4": add_user,
+            "6": check_status,
+            "7": restart
+        }
+        if choice == '0':
+            exit(0)
+        elif choice == "1":
+            caozuo[choice]()
+        elif choice == "2":
+            tmp_del = input('选择删除类型，批量删除/彻底删除_不可找回/删除单一用户/退出(Y/A/O/N):')
+            if tmp_del == 'N' or tmp_del == 'n':
+                continue
+            if tmp_del == 'Y':
+                del_list = input('请输入批量删除用户名(用英文逗号隔开):').split(',')
+                for tmp_user in del_list:
+                    del_user(tmp_user)
+            elif tmp_del == 'A':
+                del_one_en = input('请输入删除用户名(英文名):')
+                del_one_cn = input('请输入删除用户名(中文名):')
+                del_user(del_one_en)
+                subprocess.call('rm -rf {0}/{1}'.format(share_path, del_one_cn), shell=True)
+            else:
+                del_user(input('请输入删除用户名:'))
+            print('\033[5;41m删除用户后需要重启samba服务生效\033[0m')
+        elif choice == "3":
+            user = input("输入修改密码的用户名,输入N退出返回:")
+            if user == 'N' or user == 'n':
+                continue
+            caozuo[choice](user=user, glob=glob)
+            print("密码修改完毕")
+        elif choice == '4':
+            user_cn_list = input("请输入如用户名中文名(用英文逗号隔开,输入N返回):").split(',')
+            if user_cn_list[0] == 'N' or user_cn_list[0] == 'n':
+                continue
+            user_en_list = input("请输入如用户名英文名(用英文逗号隔开):").split(',')
+            user_dict = user_to_dict(user_cn_list, user_en_list)
+            caozuo[choice](user_data=user_dict)
+            print('\033[5;31m请手动重启服务\033[0m')
+        elif choice == '5':
+            user_cn_list = input("请输入如用户名中文名(用英文逗号隔开,输入N返回):").split(',')
+            if user_cn_list[0] == 'N' or user_cn_list[0] == 'n':
+                continue
+            user_en_list = input("请输入如用户名中文名(用英文逗号隔开):").split(',')
+            user_dict = user_to_dict(user_cn_list, user_en_list)
+            caozuo['3'](mod_user=user_dict)
+        elif choice == '6':
+            caozuo[choice]()
+        elif choice == '7':
+            caozuo[choice]()
+        else:
+            pass
+
+
+
+
+if __name__ == '__main__':
+    main()
+
